@@ -94,6 +94,7 @@ def get_all_leads_below_threshold(threshold: int = 60, target_date: Optional[str
                     l.name AS lead_name,
                     l.email AS lead_email,
                     l."apwId" AS apw_id,
+                    l."yearsExp" AS years_exp,
                     jr.name AS job_role_name,
                     COUNT(sj.id) AS job_count_today,
                     -- difference calculation
@@ -113,7 +114,7 @@ def get_all_leads_below_threshold(threshold: int = 60, target_date: Optional[str
                     ON sj.lead_id = l.id
                     AND DATE(sj."generatedAt") = CURRENT_DATE
                 WHERE LOWER(l.status) IN ('active', 'in progress', 'inprogress')
-                GROUP BY l.id, l.name, l.email, l."apwId", jr.name, l."servicesOpted"
+                GROUP BY l.id, l.name, l.email, l."apwId", l."yearsExp", jr.name, l."servicesOpted"
                 HAVING COUNT(sj.id) < 60
                 ORDER BY job_count_today ASC
             """
@@ -230,20 +231,22 @@ def build_multi_lead_email_template(
         job_count = lead.get('job_count_today', 0)
         difference = lead.get('difference', 0)
         apw_id = lead.get('apw_id', 'N/A') or 'N/A'
+        years_exp = lead.get('years_exp', 'N/A') or 'N/A'
         job_role_name = lead.get('job_role_name', 'N/A') or 'N/A'
         service_type = lead.get('service_type', 'Not Selected')
         
         leads_rows += f"""
         <tr style="border-bottom: 1px solid #e5e7eb;">
-            <td style="padding: 12px 8px; text-align: center; color: #6b7280; font-weight: 600;">{idx}</td>
-            <td style="padding: 12px 8px; color: #111827; font-weight: 600;">{lead_name}</td>
-            <td style="padding: 12px 8px; color: #4b5563; font-family: ui-monospace, monospace; font-size: 13px;">{lead_email}</td>
-            <td style="padding: 12px 8px; text-align: center; color: #6b7280;">{apw_id}</td>
-            <td style="padding: 12px 8px; color: #5b21b6; font-weight: 600;">{job_role_name}</td>
-            <td style="padding: 12px 8px; color: #059669; font-weight: 600;">{service_type}</td>
-            <td style="padding: 12px 8px; text-align: center; font-weight: 700; color: #e11d48;">{job_count}</td>
-            <td style="padding: 12px 8px; text-align: center; color: #6b7280;">{threshold}</td>
-            <td style="padding: 12px 8px; text-align: center; font-weight: 700; color: #dc2626;">-{difference}</td>
+            <td style="padding: 10px 6px; text-align: center; color: #6b7280; font-weight: 600; font-size: 13px;">{idx}</td>
+            <td style="padding: 10px 6px; color: #111827; font-weight: 600; font-size: 13px;">{lead_name}</td>
+            <td style="padding: 10px 6px; color: #4b5563; font-family: ui-monospace, monospace; font-size: 12px;">{lead_email}</td>
+            <td style="padding: 10px 6px; text-align: center; color: #6b7280; font-size: 13px;">{apw_id}</td>
+            <td style="padding: 10px 6px; text-align: center; color: #2563eb; font-weight: 600; font-size: 13px;">{years_exp}</td>
+            <td style="padding: 10px 6px; color: #5b21b6; font-weight: 600; font-size: 13px;">{job_role_name}</td>
+            <td style="padding: 10px 6px; color: #059669; font-weight: 600; font-size: 13px;">{service_type}</td>
+            <td style="padding: 10px 6px; text-align: center; font-weight: 700; color: #e11d48; font-size: 13px;">{job_count}</td>
+            <td style="padding: 10px 6px; text-align: center; color: #6b7280; font-size: 13px;">{threshold}</td>
+            <td style="padding: 10px 6px; text-align: center; font-weight: 700; color: #dc2626; font-size: 13px;">-{difference}</td>
         </tr>
         """
     
@@ -262,7 +265,7 @@ def build_multi_lead_email_template(
       color: #111827;
     }}
     .container {{
-      max-width: 900px;
+      max-width: 1100px;
       margin: 32px auto;
       background: #ffffff;
       border-radius: 16px;
@@ -299,10 +302,14 @@ def build_multi_lead_email_template(
       margin: 20px 0;
       border-radius: 8px;
     }}
+    .table-wrapper {{
+      overflow-x: auto;
+      margin: 20px 0;
+    }}
     table {{
       width: 100%;
+      min-width: 1000px;
       border-collapse: collapse;
-      margin: 20px 0;
       background: white;
       border: 1px solid #e5e7eb;
       border-radius: 8px;
@@ -310,16 +317,25 @@ def build_multi_lead_email_template(
     }}
     th {{
       background: #f9fafb;
-      padding: 12px 8px;
+      padding: 10px 6px;
       text-align: left;
       font-weight: 700;
-      font-size: 12px;
+      font-size: 11px;
       text-transform: uppercase;
-      letter-spacing: 0.05em;
+      letter-spacing: 0.03em;
       color: #6b7280;
       border-bottom: 2px solid #e5e7eb;
+      white-space: nowrap;
     }}
-    th:nth-child(1), th:nth-child(4), th:nth-child(7), th:nth-child(8), th:nth-child(9) {{
+    td {{
+      padding: 10px 6px;
+      font-size: 13px;
+      border-bottom: 1px solid #f3f4f6;
+    }}
+    th:nth-child(1), th:nth-child(4), th:nth-child(5), th:nth-child(8), th:nth-child(9), th:nth-child(10) {{
+      text-align: center;
+    }}
+    td:nth-child(1), td:nth-child(4), td:nth-child(5), td:nth-child(8), td:nth-child(9), td:nth-child(10) {{
       text-align: center;
     }}
     .footer {{
@@ -361,24 +377,27 @@ def build_multi_lead_email_template(
 
       <h3 style="color: #111827; margin-top: 24px;">Leads Below Threshold</h3>
       
-      <table>
-        <thead>
-          <tr>
-            <th>#</th>
-            <th>Lead Name</th>
-            <th>Email</th>
-            <th>APW ID</th>
-            <th>Job Role</th>
-            <th>Service Opted</th>
-            <th>Job Links</th>
-            <th>Threshold</th>
-            <th>Shortfall</th>
-          </tr>
-        </thead>
-        <tbody>
-          {leads_rows}
-        </tbody>
-      </table>
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Lead Name</th>
+              <th>Email</th>
+              <th>APW ID</th>
+              <th>Years Exp</th>
+              <th>Job Role</th>
+              <th>Service Opted</th>
+              <th>Job Links</th>
+              <th>Threshold</th>
+              <th>Shortfall</th>
+            </tr>
+          </thead>
+          <tbody>
+            {leads_rows}
+          </tbody>
+        </table>
+      </div>
 
       <p style="margin-top: 24px; color: #6b7280; font-size: 13px;">
         <strong>Suggested Actions:</strong>
