@@ -45,7 +45,7 @@ APP_NAME = "Task Management"
 
 # Job Links Threshold
 JOB_LINKS_THRESHOLD = 60
-TEST_EMAIL_RECIPIENT = "ramakrishna@applywizz.com.com"
+TEST_EMAIL_RECIPIENT = "ramakrishna@applywizz.com"
 
 # CC Recipients - comma-separated list of email addresses
 # Can be set via environment variable: CC_EMAIL_RECIPIENTS="email1@example.com,email2@example.com"
