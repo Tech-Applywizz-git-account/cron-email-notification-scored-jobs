@@ -28,8 +28,5 @@ python-dotenv==1.0.1
 tenacity==8.3.0
 pdfminer.six==20231228
 python-docx==1.1.2
-# SQLAlchemy==2.0.32
-# pandas==2.2.2
-# FastAPI and Uvicorn for email notification API
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
