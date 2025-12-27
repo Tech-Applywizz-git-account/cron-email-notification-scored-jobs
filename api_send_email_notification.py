@@ -311,6 +311,7 @@ def build_task_status_email_template(
       font-size: 24px;
       font-weight: 700;
       color: white;
+      padding: 16px;
     }}
     .sub {{
       background-color: #3b82f6;
@@ -318,6 +319,7 @@ def build_task_status_email_template(
       font-size: 14px;
       opacity: 0.9;
       color: white;
+      padding: 16px;
     }}
     .body {{
       padding: 24px 32px 32px;
