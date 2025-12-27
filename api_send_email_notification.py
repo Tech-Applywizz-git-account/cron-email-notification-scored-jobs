@@ -45,7 +45,7 @@ APP_NAME = "Task Management"
 
 # Job Links Threshold
 JOB_LINKS_THRESHOLD = 60
-TEST_EMAIL_RECIPIENT = "ramakrishna@applywizz.com"
+TEST_EMAIL_RECIPIENT = "bhanutejathouti@gmail.com"
 
 # CC Recipients - comma-separated list of email addresses
 # Can be set via environment variable: CC_EMAIL_RECIPIENTS="email1@example.com,email2@example.com"
@@ -70,55 +70,76 @@ def get_db_connection():
 
 
 # -----------------------
-# Query All Leads Below Threshold
+# Query Task Status Summary for Today
 # -----------------------
-def get_all_leads_below_threshold(threshold: int = 60, target_date: Optional[str] = None):
+def get_task_status_summary():
     """
-    Query the karmafy_scoredjob table to find ALL leads with job count below threshold for a specific date.
+    Query tasks created today and get status breakdown for tasks with score >= 75.
+    Groups by lead and CA (ops person).
     
-    Args:
-        threshold: The minimum job count threshold
-        target_date: Date in 'YYYY-MM-DD' format. Defaults to today's date if not provided.
-    
-    Returns list of dicts with lead info and job count for the specified date.
+    Returns list of dicts with lead info, CA info, and task status counts.
     """
     conn = get_db_connection()
     try:
-        # If no date provided, use today's date
-        if target_date is None:
-            target_date = datetime.now().strftime('%Y-%m-%d')
-        
         with conn.cursor(cursor_factory=RealDictCursor) as cursor:
             query = """
-                SELECT 
-                    l.name AS lead_name,
-                    l.email AS lead_email,
+                SELECT
                     l."apwId" AS apw_id,
-                    l."yearsExp" AS years_exp,
-                    jr.name AS job_role_name,
-                    COUNT(sj.id) AS job_count_today,
-                    -- difference calculation
-                    60 - COUNT(sj.id) AS difference,
-                    -- service type based on servicesOpted JSONB
-                    CASE 
-                        WHEN l."servicesOpted" @> '["applications"]'::jsonb 
-                            THEN 'Opted for Applications'
-                        WHEN l."servicesOpted" @> '["job-links"]'::jsonb 
-                            THEN 'Opted for Job Links'
-                        ELSE 'Not Selected'
-                    END AS service_type
-                FROM karmafy_lead l
-                LEFT JOIN karmafy_jobrole jr 
-                    ON jr.id = l."targetRoleId_id"
-                LEFT JOIN karmafy_scoredjob sj 
-                    ON sj.lead_id = l.id
-                    AND DATE(sj."generatedAt") = CURRENT_DATE
-                WHERE LOWER(l.status) IN ('active', 'in progress', 'inprogress')
-                GROUP BY l.id, l.name, l.email, l."apwId", l."yearsExp", jr.name, l."servicesOpted"
-                HAVING COUNT(sj.id) < 60
-                ORDER BY job_count_today ASC
+                    l.email AS lead_email,
+                    op.name AS ca_name,
+                    op.email AS ca_email,
+
+                    COUNT(*) FILTER (
+                        WHERE sj.score >= 75
+                          AND LOWER(t.status) = 'completed'
+                    ) AS completed_75_plus,
+
+                    COUNT(*) FILTER (
+                        WHERE sj.score >= 75
+                          AND LOWER(t.status) = 'pending'
+                    ) AS pending_75_plus,
+
+                    COUNT(*) FILTER (
+                        WHERE sj.score >= 75
+                          AND LOWER(t.status) = 'in_progress'
+                    ) AS in_progress_75_plus,
+
+                    COUNT(*) FILTER (
+                        WHERE sj.score >= 75
+                          AND LOWER(t.status) = 'not_relevant'
+                    ) AS not_relevant_75_plus,
+
+                    COUNT(*) FILTER (
+                        WHERE sj.score >= 75
+                          AND LOWER(t.status) = 'job_not_found'
+                    ) AS job_not_found_75_plus,
+
+                    COUNT(*) FILTER (
+                        WHERE sj.score >= 75
+                          AND LOWER(t.status) = 'already_applied'
+                    ) AS already_applied_75_plus
+
+                FROM karmafy_task t
+                JOIN karmafy_scoredjob sj
+                    ON sj.id = t."scored_jobId"
+                JOIN karmafy_lead l
+                    ON l.id = t."leadId"
+                LEFT JOIN public."karmafy_opsPerson" op
+                    ON op.user_id = t."ops_personId"
+
+                WHERE t."createdAt" >= TIMESTAMPTZ '2025-12-23 00:00:00+00'
+  AND t."createdAt" <  TIMESTAMPTZ '2025-12-24 00:00:00+00'
+
+                GROUP BY
+                    l."apwId",
+                    l.email,
+                    op.name,
+                    op.email
+
+                ORDER BY
+                    op.name
             """
-            cursor.execute(query, (threshold, target_date, threshold))
+            cursor.execute(query)
             results = cursor.fetchall()
             
             # Convert to list of dicts
@@ -215,38 +236,44 @@ def send_mail_via_graph(to: str, subject: str, html: str, cc: Optional[list] = N
         raise HTTPException(status_code=500, detail="Failed to send email via Microsoft Graph")
 
 
-def build_multi_lead_email_template(
+def build_task_status_email_template(
     app_name: str,
-    leads_data: list,
-    threshold: int,
+    tasks_data: list,
     support_url: str = "https://dashboard.apply-wizz.com/",
 ) -> str:
-    """Build the HTML email template with multiple leads' job links data"""
+    """Build the HTML email template with task status breakdown for tasks with score >= 75"""
     
-    # Build table rows for all leads
-    leads_rows = ""
-    for idx, lead in enumerate(leads_data, 1):
-        lead_name = lead.get('lead_name', 'Unknown')
-        lead_email = lead.get('lead_email', 'N/A')
-        job_count = lead.get('job_count_today', 0)
-        difference = lead.get('difference', 0)
-        apw_id = lead.get('apw_id', 'N/A') or 'N/A'
-        years_exp = lead.get('years_exp', 'N/A') or 'N/A'
-        job_role_name = lead.get('job_role_name', 'N/A') or 'N/A'
-        service_type = lead.get('service_type', 'Not Selected')
+    # Build table rows for all task summaries
+    task_rows = ""
+    for idx, task in enumerate(tasks_data, 1):
+        apw_id = task.get('apw_id', 'N/A') or 'N/A'
+        lead_email = task.get('lead_email', 'N/A')
+        ca_name = task.get('ca_name', 'N/A') or 'N/A'
+        ca_email = task.get('ca_email', 'N/A') or 'N/A'
         
-        leads_rows += f"""
+        completed = task.get('completed_75_plus', 0)
+        pending = task.get('pending_75_plus', 0)
+        in_progress = task.get('in_progress_75_plus', 0)
+        not_relevant = task.get('not_relevant_75_plus', 0)
+        job_not_found = task.get('job_not_found_75_plus', 0)
+        already_applied = task.get('already_applied_75_plus', 0)
+        
+        total_tasks = completed + pending + in_progress + not_relevant + job_not_found + already_applied
+        
+        task_rows += f"""
         <tr style="border-bottom: 1px solid #e5e7eb;">
-            <td style="padding: 10px 6px; text-align: center; color: #6b7280; font-weight: 600; font-size: 13px;">{idx}</td>
-            <td style="padding: 10px 6px; color: #111827; font-weight: 600; font-size: 13px;">{lead_name}</td>
-            <td style="padding: 10px 6px; color: #4b5563; font-family: ui-monospace, monospace; font-size: 12px;">{lead_email}</td>
-            <td style="padding: 10px 6px; text-align: center; color: #6b7280; font-size: 13px;">{apw_id}</td>
-            <td style="padding: 10px 6px; text-align: center; color: #2563eb; font-weight: 600; font-size: 13px;">{years_exp}</td>
-            <td style="padding: 10px 6px; color: #5b21b6; font-weight: 600; font-size: 13px;">{job_role_name}</td>
-            <td style="padding: 10px 6px; color: #059669; font-weight: 600; font-size: 13px;">{service_type}</td>
-            <td style="padding: 10px 6px; text-align: center; font-weight: 700; color: #e11d48; font-size: 13px;">{job_count}</td>
-            <td style="padding: 10px 6px; text-align: center; color: #6b7280; font-size: 13px;">{threshold}</td>
-            <td style="padding: 10px 6px; text-align: center; font-weight: 700; color: #dc2626; font-size: 13px;">-{difference}</td>
+            <td style="padding: 10px 8px; text-align: center; color: #6b7280; font-weight: 600; font-size: 13px;">{idx}</td>
+            <td style="padding: 10px 8px; text-align: center; color: #111827; font-weight: 600; font-size: 13px;">{apw_id}</td>
+            <td style="padding: 10px 8px; color: #4b5563; font-family: ui-monospace, monospace; font-size: 12px;">{lead_email}</td>
+            <td style="padding: 10px 8px; color: #111827; font-weight: 600; font-size: 13px;">{ca_name}</td>
+            <td style="padding: 10px 8px; color: #6b7280; font-family: ui-monospace, monospace; font-size: 12px;">{ca_email}</td>
+            <td style="padding: 10px 8px; text-align: center; font-weight: 700; color: #059669; font-size: 13px;">{completed}</td>
+            <td style="padding: 10px 8px; text-align: center; font-weight: 700; color: #f59e0b; font-size: 13px;">{pending}</td>
+            <td style="padding: 10px 8px; text-align: center; font-weight: 700; color: #3b82f6; font-size: 13px;">{in_progress}</td>
+            <td style="padding: 10px 8px; text-align: center; font-weight: 700; color: #6b7280; font-size: 13px;">{not_relevant}</td>
+            <td style="padding: 10px 8px; text-align: center; font-weight: 700; color: #dc2626; font-size: 13px;">{job_not_found}</td>
+            <td style="padding: 10px 8px; text-align: center; font-weight: 700; color: #8b5cf6; font-size: 13px;">{already_applied}</td>
+            <td style="padding: 10px 8px; text-align: center; font-weight: 700; color: #111827; font-size: 13px; background-color: #f3f4f6;">{total_tasks}</td>
         </tr>
         """
     
@@ -254,7 +281,7 @@ def build_multi_lead_email_template(
 <html lang="en">
 <head>
   <meta charSet="UTF-8" />
-  <title>{app_name} – Job Links Threshold Alert</title>
+  <title>{app_name} – Daily Task Status Report (Score ≥ 75)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     body {{
@@ -265,7 +292,7 @@ def build_multi_lead_email_template(
       color: #111827;
     }}
     .container {{
-      max-width: 1100px;
+      max-width: 1400px;
       margin: 32px auto;
       background: #ffffff;
       border-radius: 16px;
@@ -273,7 +300,7 @@ def build_multi_lead_email_template(
       box-shadow: 0 18px 45px rgba(15, 23, 42, 0.12);
     }}
     .header {{
-      background: #fef2f2;
+      background: linear-gradient(135deg, #3b82f6, #8b5cf6);
       padding: 24px 32px;
       color: white;
       text-align: left;
@@ -282,22 +309,22 @@ def build_multi_lead_email_template(
       margin-top: 10px;
       font-size: 24px;
       font-weight: 700;
-      color:#ef4444;
+      color: white;
     }}
     .sub {{
       margin-top: 6px;
       font-size: 14px;
       opacity: 0.9;
-      color:#ef4444;
+      color: white;
     }}
     .body {{
       padding: 24px 32px 32px;
       font-size: 14px;
       line-height: 1.6;
     }}
-    .alert-box {{
-      background-color: #fef2f2;
-      border-left: 4px solid #ef4444;
+    .info-box {{
+      background-color: #eff6ff;
+      border-left: 4px solid #3b82f6;
       padding: 16px;
       margin: 20px 0;
       border-radius: 8px;
@@ -308,7 +335,7 @@ def build_multi_lead_email_template(
     }}
     table {{
       width: 100%;
-      min-width: 1000px;
+      min-width: 1300px;
       border-collapse: collapse;
       background: white;
       border: 1px solid #e5e7eb;
@@ -317,7 +344,7 @@ def build_multi_lead_email_template(
     }}
     th {{
       background: #f9fafb;
-      padding: 10px 6px;
+      padding: 10px 8px;
       text-align: left;
       font-weight: 700;
       font-size: 11px;
@@ -328,14 +355,12 @@ def build_multi_lead_email_template(
       white-space: nowrap;
     }}
     td {{
-      padding: 10px 6px;
+      padding: 10px 8px;
       font-size: 13px;
       border-bottom: 1px solid #f3f4f6;
     }}
-    th:nth-child(1), th:nth-child(4), th:nth-child(5), th:nth-child(8), th:nth-child(9), th:nth-child(10) {{
-      text-align: center;
-    }}
-    td:nth-child(1), td:nth-child(4), td:nth-child(5), td:nth-child(8), td:nth-child(9), td:nth-child(10) {{
+    th:nth-child(1), th:nth-child(2), th:nth-child(6), th:nth-child(7), th:nth-child(8), 
+    th:nth-child(9), th:nth-child(10), th:nth-child(11), th:nth-child(12) {{
       text-align: center;
     }}
     .footer {{
@@ -348,65 +373,114 @@ def build_multi_lead_email_template(
       display: inline-block;
       margin-top: 18px;
       padding: 12px 24px;
-      background: linear-gradient(135deg, #e11d48, #f59e0b);
+      background: linear-gradient(135deg, #3b82f6, #8b5cf6);
       color: white !important;
       text-decoration: none;
       border-radius: 999px;
       font-weight: 600;
       font-size: 14px;
     }}
+    .legend {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      margin: 20px 0;
+      padding: 16px;
+      background: #f9fafb;
+      border-radius: 8px;
+    }}
+    .legend-item {{
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+    }}
+    .legend-color {{
+      width: 16px;
+      height: 16px;
+      border-radius: 4px;
+    }}
   </style>
 </head>
 <body>
   <div class="container">
     <div class="header">
-      <div class="title">⚠️ Job Links Below Threshold Alert</div>
+      <div class="title">📊 Daily Task Status Report (Score ≥ 75)</div>
       <div class="sub">
-        {len(leads_data)} lead(s) have received fewer than {threshold} job links
+        Task status breakdown for {len(tasks_data)} lead-CA combination(s) - {datetime.utcnow().strftime('%Y-%m-%d')}
       </div>
     </div>
     <div class="body">
       <p>Hi Team,</p>
       <p>
-        This is an automated alert to inform you that <strong>{len(leads_data)} lead(s)</strong> currently have job links below the expected threshold of <strong>{threshold}</strong>.
+        This is your daily task status report showing the breakdown of all tasks created today with a score of <strong>75 or higher</strong>, grouped by lead and assigned CA (Customer Advocate).
       </p>
 
-      <div class="alert-box">
-        <strong>⚠️ Action Required:</strong> Please review these leads and ensure they are receiving adequate job matches.
+      <div class="info-box">
+        <strong>ℹ️ Report Details:</strong> This report includes only tasks with scores ≥ 75 created on {datetime.utcnow().strftime('%Y-%m-%d')} (UTC).
       </div>
 
-      <h3 style="color: #111827; margin-top: 24px;">Leads Below Threshold</h3>
+      <div class="legend">
+        <div class="legend-item">
+          <div class="legend-color" style="background-color: #059669;"></div>
+          <span><strong>Completed:</strong> Tasks successfully completed</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-color" style="background-color: #f59e0b;"></div>
+          <span><strong>Pending:</strong> Tasks awaiting action</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-color" style="background-color: #3b82f6;"></div>
+          <span><strong>In Progress:</strong> Tasks currently being worked on</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-color" style="background-color: #6b7280;"></div>
+          <span><strong>Not Relevant:</strong> Tasks marked as not relevant</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-color" style="background-color: #dc2626;"></div>
+          <span><strong>Job Not Found:</strong> Tasks where job posting was not found</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-color" style="background-color: #8b5cf6;"></div>
+          <span><strong>Already Applied:</strong> Jobs already applied to</span>
+        </div>
+      </div>
+
+      <h3 style="color: #111827; margin-top: 24px;">Task Status Breakdown by Lead & CA</h3>
       
       <div class="table-wrapper">
         <table>
           <thead>
             <tr>
               <th>#</th>
-              <th>Lead Name</th>
-              <th>Email</th>
               <th>APW ID</th>
-              <th>Years Exp</th>
-              <th>Job Role</th>
-              <th>Service Opted</th>
-              <th>Job Links</th>
-              <th>Threshold</th>
-              <th>Shortfall</th>
+              <th>Lead Email</th>
+              <th>CA Name</th>
+              <th>CA Email</th>
+              <th style="background-color: #ecfdf5;">Completed</th>
+              <th style="background-color: #fffbeb;">Pending</th>
+              <th style="background-color: #eff6ff;">In Progress</th>
+              <th style="background-color: #f9fafb;">Not Relevant</th>
+              <th style="background-color: #fef2f2;">Job Not Found</th>
+              <th style="background-color: #f5f3ff;">Already Applied</th>
+              <th style="background-color: #f3f4f6;">Total</th>
             </tr>
           </thead>
           <tbody>
-            {leads_rows}
+            {task_rows}
           </tbody>
         </table>
       </div>
 
       <p style="margin-top: 24px; color: #6b7280; font-size: 13px;">
-        <strong>Suggested Actions:</strong>
+        <strong>Key Insights:</strong>
       </p>
       <ul style="color: #6b7280; font-size: 13px;">
-        <li>Review lead profiles and scoring criteria</li>
-        <li>Check if job sources are providing adequate matches</li>
-        <li>Consider adjusting target role parameters</li>
-        <li>Verify lead preferences and requirements</li>
+        <li>Review leads with high "Not Relevant" or "Job Not Found" counts</li>
+        <li>Monitor "Pending" tasks to ensure timely completion</li>
+        <li>Check "Already Applied" tasks to avoid duplicate applications</li>
+        <li>Celebrate leads with high "Completed" task counts</li>
       </ul>
 
       <a href="{support_url}" class="cta-button" target="_blank" rel="noopener noreferrer">
@@ -428,36 +502,34 @@ def build_multi_lead_email_template(
     return html
 
 # -----------------------
-# NEW ENDPOINT: Check ALL leads below threshold
+# NEW ENDPOINT: Send daily task status report
 # -----------------------
-@app.post("/check-all-leads-threshold")
-def check_all_leads_threshold():
+@app.post("/send-task-status-report")
+def send_task_status_report():
     """
-    Check ALL leads in the database and find those below threshold.
-    Send ONE email with a summary of all leads below threshold.
+    Send daily task status report for tasks with score >= 75.
+    Shows breakdown by status (completed, pending, in_progress, etc.) grouped by lead and CA.
     """
-    # Query database for all leads below threshold
-    leads_below_threshold = get_all_leads_below_threshold(JOB_LINKS_THRESHOLD)
+    # Query database for task status summary
+    task_summary = get_task_status_summary()
     
-    if not leads_below_threshold:
+    if not task_summary:
         return {
             "success": True,
-            "message": "All leads are above threshold!",
-            "leads_count": 0,
-            "threshold": JOB_LINKS_THRESHOLD,
+            "message": "No tasks found for today with score >= 75",
+            "task_count": 0,
             "email_sent": False
         }
     
-    # Build email with all leads information
-    subject = f"{APP_NAME} Alert: {len(leads_below_threshold)} Lead(s) Below Job Links Threshold"
+    # Build email with task status breakdown
+    subject = f"{APP_NAME} - Daily Task Status Report (Score ≥ 75) - {datetime.utcnow().strftime('%Y-%m-%d')}"
     
-    html = build_multi_lead_email_template(
+    html = build_task_status_email_template(
         app_name=APP_NAME,
-        leads_data=leads_below_threshold,
-        threshold=JOB_LINKS_THRESHOLD,
+        tasks_data=task_summary,
     )
     
-    # Send email with all leads information (with CC)
+    # Send email with task status information (with CC)
     send_mail_via_graph(
         to=TEST_EMAIL_RECIPIENT,
         subject=subject,
@@ -465,20 +537,26 @@ def check_all_leads_threshold():
         cc=CC_EMAIL_RECIPIENTS,
     )
     
-    print(f"✅ Batch threshold alert email sent to {TEST_EMAIL_RECIPIENT}")
-    print(f"   Total leads below threshold: {len(leads_below_threshold)}")
-    print(f"   Threshold: {JOB_LINKS_THRESHOLD}")
-    for lead in leads_below_threshold[:5]:  # Print first 5
-        print(f"   - {lead['lead_name']} ({lead['job_count_today']} job links)")
-    if len(leads_below_threshold) > 5:
-        print(f"   ... and {len(leads_below_threshold) - 5} more")
+    print(f"✅ Daily task status report sent to {TEST_EMAIL_RECIPIENT}")
+    print(f"   Total lead-CA combinations: {len(task_summary)}")
+    for task in task_summary[:5]:  # Print first 5
+        total = sum([
+            task.get('completed_75_plus', 0),
+            task.get('pending_75_plus', 0),
+            task.get('in_progress_75_plus', 0),
+            task.get('not_relevant_75_plus', 0),
+            task.get('job_not_found_75_plus', 0),
+            task.get('already_applied_75_plus', 0)
+        ])
+        print(f"   - Lead {task['apw_id']} / CA {task['ca_name']}: {total} tasks")
+    if len(task_summary) > 5:
+        print(f"   ... and {len(task_summary) - 5} more")
     
     return {
         "success": True,
-        "message": f"Found {len(leads_below_threshold)} lead(s) below threshold - batch notification email sent",
-        "leads_count": len(leads_below_threshold),
-        "threshold": JOB_LINKS_THRESHOLD,
-        "leads": leads_below_threshold,
+        "message": f"Daily task status report sent for {len(task_summary)} lead-CA combination(s)",
+        "task_combinations_count": len(task_summary),
+        "tasks_data": task_summary,
         "email_sent": True,
         "email_sent_to": TEST_EMAIL_RECIPIENT
     }
@@ -494,9 +572,9 @@ def health_check():
 # Main execution when run as script (for cron jobs)
 # -----------------------
 if __name__ == "__main__":
-    print("🚀 Starting email notification check...")
+    print("🚀 Starting daily task status report...")
     try:
-        result = check_all_leads_threshold()
+        result = send_task_status_report()
         print(f"✅ Execution completed successfully!")
         print(f"Result: {result}")
     except Exception as e:
