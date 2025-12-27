@@ -306,14 +306,14 @@ def build_task_status_email_template(
       text-align: left;
     }}
     .title {{
-      background-color: #eff6ff;
+      background-color: #3b82f6;
       margin-top: 10px;
       font-size: 24px;
       font-weight: 700;
       color: white;
     }}
     .sub {{
-      background-color: #eff6ff;
+      background-color: #3b82f6;
       margin-top: 6px;
       font-size: 14px;
       opacity: 0.9;
