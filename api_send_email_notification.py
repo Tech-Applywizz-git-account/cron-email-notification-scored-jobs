@@ -271,8 +271,6 @@ def build_task_status_email_template(
         job_not_found = task.get('job_not_found_75_plus', 0)
         already_applied = task.get('already_applied_75_plus', 0)
         
-        total_tasks = completed + pending + in_progress + not_relevant + job_not_found + already_applied
-        
         task_rows += f"""
         <tr style="border-bottom: 1px solid #e5e7eb;">
             <td style="padding: 10px 8px; text-align: center; color: #6b7280; font-weight: 600; font-size: 13px;">{idx}</td>
@@ -287,7 +285,6 @@ def build_task_status_email_template(
             <td style="padding: 10px 8px; text-align: center; font-weight: 700; color: #6b7280; font-size: 13px;">{not_relevant}</td>
             <td style="padding: 10px 8px; text-align: center; font-weight: 700; color: #dc2626; font-size: 13px;">{job_not_found}</td>
             <td style="padding: 10px 8px; text-align: center; font-weight: 700; color: #8b5cf6; font-size: 13px;">{already_applied}</td>
-            <td style="padding: 10px 8px; text-align: center; font-weight: 700; color: #111827; font-size: 13px; background-color: #f3f4f6;">{total_tasks}</td>
         </tr>
         """
     
@@ -353,7 +350,7 @@ def build_task_status_email_template(
     }}
     table {{
       width: 100%;
-      min-width: 1400px;
+      min-width: 1300px;
       border-collapse: collapse;
       background: white;
       border: 1px solid #e5e7eb;
@@ -378,7 +375,7 @@ def build_task_status_email_template(
       border-bottom: 1px solid #f3f4f6;
     }}
     th:nth-child(1), th:nth-child(2), th:nth-child(6), th:nth-child(7), th:nth-child(8), 
-    th:nth-child(9), th:nth-child(10), th:nth-child(11), th:nth-child(12), th:nth-child(13) {{
+    th:nth-child(9), th:nth-child(10), th:nth-child(11), th:nth-child(12) {{
       text-align: center;
     }}
     .footer {{
@@ -483,7 +480,6 @@ def build_task_status_email_template(
               <th style="background-color: #f9fafb;">Not Relevant</th>
               <th style="background-color: #fef2f2;">Job Not Found</th>
               <th style="background-color: #f5f3ff;">Already Applied</th>
-              <th style="background-color: #f3f4f6;">Total</th>
             </tr>
           </thead>
           <tbody>
