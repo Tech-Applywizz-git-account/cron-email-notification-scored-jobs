@@ -86,8 +86,13 @@ def get_task_status_summary():
                 SELECT
                     l."apwId" AS apw_id,
                     l.email AS lead_email,
-                    op.name AS ca_name,
-                    op.email AS ca_email,
+
+                    u.full_name AS ca_name,
+                    u.email AS ca_email,
+
+                    COUNT(*) FILTER (
+                        WHERE sj.score >= 75
+                    ) AS total_75_plus,
 
                     COUNT(*) FILTER (
                         WHERE sj.score >= 75
@@ -124,20 +129,27 @@ def get_task_status_summary():
                     ON sj.id = t."scored_jobId"
                 JOIN karmafy_lead l
                     ON l.id = t."leadId"
-                LEFT JOIN public."karmafy_opsPerson" op
-                    ON op.user_id = t."ops_personId"
 
-                WHERE t."createdAt" >= TIMESTAMPTZ '2025-12-23 00:00:00+00'
-  AND t."createdAt" <  TIMESTAMPTZ '2025-12-24 00:00:00+00'
+                -- 🔹 NEW: map lead → ops person
+                LEFT JOIN public."karmafy_leadOpsAgentMapping" lom
+                    ON lom."leadId" = t."leadId"
+
+                -- 🔹 NEW: fetch ops person details
+                LEFT JOIN public.karmafy_user u
+                    ON u.id = lom."ops_personId"
+
+                WHERE 
+                    t."createdAt" >= (CURRENT_DATE AT TIME ZONE 'Asia/Kolkata')
+                    AND t."createdAt" < ((CURRENT_DATE + INTERVAL '1 day') AT TIME ZONE 'Asia/Kolkata')
 
                 GROUP BY
                     l."apwId",
                     l.email,
-                    op.name,
-                    op.email
+                    u.full_name,
+                    u.email
 
                 ORDER BY
-                    op.name
+                    u.full_name
             """
             cursor.execute(query)
             results = cursor.fetchall()
@@ -251,6 +263,7 @@ def build_task_status_email_template(
         ca_name = task.get('ca_name', 'N/A') or 'N/A'
         ca_email = task.get('ca_email', 'N/A') or 'N/A'
         
+        total_75_plus = task.get('total_75_plus', 0)
         completed = task.get('completed_75_plus', 0)
         pending = task.get('pending_75_plus', 0)
         in_progress = task.get('in_progress_75_plus', 0)
@@ -267,6 +280,7 @@ def build_task_status_email_template(
             <td style="padding: 10px 8px; color: #4b5563; font-family: ui-monospace, monospace; font-size: 12px;">{lead_email}</td>
             <td style="padding: 10px 8px; color: #111827; font-weight: 600; font-size: 13px;">{ca_name}</td>
             <td style="padding: 10px 8px; color: #6b7280; font-family: ui-monospace, monospace; font-size: 12px;">{ca_email}</td>
+            <td style="padding: 10px 8px; text-align: center; font-weight: 700; color: #111827; font-size: 13px; background-color: #fef3c7;">{total_75_plus}</td>
             <td style="padding: 10px 8px; text-align: center; font-weight: 700; color: #059669; font-size: 13px;">{completed}</td>
             <td style="padding: 10px 8px; text-align: center; font-weight: 700; color: #f59e0b; font-size: 13px;">{pending}</td>
             <td style="padding: 10px 8px; text-align: center; font-weight: 700; color: #3b82f6; font-size: 13px;">{in_progress}</td>
@@ -339,7 +353,7 @@ def build_task_status_email_template(
     }}
     table {{
       width: 100%;
-      min-width: 1300px;
+      min-width: 1400px;
       border-collapse: collapse;
       background: white;
       border: 1px solid #e5e7eb;
@@ -364,7 +378,7 @@ def build_task_status_email_template(
       border-bottom: 1px solid #f3f4f6;
     }}
     th:nth-child(1), th:nth-child(2), th:nth-child(6), th:nth-child(7), th:nth-child(8), 
-    th:nth-child(9), th:nth-child(10), th:nth-child(11), th:nth-child(12) {{
+    th:nth-child(9), th:nth-child(10), th:nth-child(11), th:nth-child(12), th:nth-child(13) {{
       text-align: center;
     }}
     .footer {{
@@ -462,6 +476,7 @@ def build_task_status_email_template(
               <th>Lead Email</th>
               <th>CA Name</th>
               <th>CA Email</th>
+              <th style="background-color: #fef3c7;">Total 75+</th>
               <th style="background-color: #ecfdf5;">Completed</th>
               <th style="background-color: #fffbeb;">Pending</th>
               <th style="background-color: #eff6ff;">In Progress</th>
